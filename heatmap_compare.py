@@ -5,154 +5,191 @@ import matplotlib.pyplot as plt
 import argparse
 
 
+def read_img_in_gray(file, coefs=None):
+    if coefs is None:
+        coefs = [0.2126, 0.7152, 0.0722]
+
+    def rgb2gray(rgb):
+        return np.dot(rgb[..., :3], coefs)
+
+    img = cv2.imread(file, cv2.COLOR_BGR2RGB)
+    return rgb2gray(img)
+
+
 def make_dir(path):
     if not os.path.exists(path):
         os.mkdir(path)
     return os.path.abspath(path)
 
 
-PATH_TO_IMGS = make_dir("images")
-PATH_TO_GRAY_IMGS = make_dir(os.path.join(PATH_TO_IMGS, "gray"))
+PATH_TO_GRAY_IMGS = make_dir("gray_images")
+
 RESULT_DIR = make_dir("res")
 RESULT_HM_DIR = make_dir(os.path.join(RESULT_DIR, "heatmaps"))
 RESULT_DIF_DIR = make_dir(os.path.join(RESULT_DIR, "diff"))
 
-N_GRAY = 1
-diff_save_path = ""
-need_save_gray = False
-need_save_heat_map = True
-file1 = ""
-file2 = ""
 COLORMAP = 'seismic'
-
-
-def make_diff(ar1, ar2):
-    assert ar1.shape == ar2.shape
-    arr_diff = np.abs(ar1 - ar2)
-    mx = np.max(arr_diff)
-    # нормализация
-    arr_diff = arr_diff / mx
-    arr_diff *= 255
-    return arr_diff
+# COLORMAP = 'YlOrBr'
+BIT_IMAGES_LEN = 2 ** 8 - 1
 
 
 def get_file_name(file):
     return os.path.splitext(os.path.basename(file))[0]
 
 
-def make_gray_img(file, coefs=None):
-    global N_GRAY
-    if coefs is None:
-        coefs = [0.333, 0.333, 0.334]
+class HeatMap:
+    def __init__(self, file1, file2):
+        if not os.path.isfile(file1) or not os.path.isfile(file2):
+            raise FileNotFoundError(file1 + " or " + file2 + " not exist")
+        self.__file_name1 = get_file_name(file1)
+        self.__file_name2 = get_file_name(file2)
+        self.__diff_save_path = os.path.join(RESULT_DIF_DIR, f"{self.__file_name1}_{self.__file_name2}.png")
+        self.__heatmap_path = os.path.join(RESULT_HM_DIR, f"{self.__file_name1}_{self.__file_name2}.png")
 
-    def rgb2gray(rgb):
-        return np.dot(rgb[..., :3], coefs)
+        gray_image = cv2.imread(file1, cv2.IMREAD_GRAYSCALE)
+        gray_image2 = cv2.imread(file2, cv2.IMREAD_GRAYSCALE)
 
-    img = cv2.imread(file, cv2.COLOR_BGR2RGB)
-    # img = img[0:250, 0:250]
-    gray_img = rgb2gray(img)
-    if need_save_gray:
-        file_name = get_file_name(file) + str(N_GRAY)
-        N_GRAY += 1
-        file_name = os.path.join(PATH_TO_GRAY_IMGS, file_name + '_gray.jpg')
-        cv2.imwrite(file_name, gray_img)
-    return gray_img
+        # gray_image = read_img_in_gray(file1)
+        # gray_image2 = read_img_in_gray(file2)
 
+        # self.__gray_image = read_img_in_gray(file1)
+        # self.__gray_image2 = read_img_in_gray(file2)
 
-def make_heat_map(arr, ar1=None, ar2=None):
-    from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
-    rc = {"axes.spines.left": False,
-          "axes.spines.right": False,
-          "axes.spines.bottom": False,
-          "axes.spines.top": False,
-          "xtick.bottom": False,
-          "xtick.labelbottom": False,
-          "ytick.labelleft": False,
-          "ytick.left": False}
-    plt.rcParams.update(rc)
-    fig = plt.figure(figsize=(4, 4))
-    # fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1)
+        self.__image1 = plt.imread(file1)
+        self.__image2 = plt.imread(file2)
+        # self.__image2 = self.__gray_image2
+        self.__ar1 = np.asarray(gray_image, float)
+        self.__ar2 = np.asarray(gray_image2, float)
+        if self.__ar1.shape != self.__ar2.shape:
+            raise ValueError("images have different shapes")
+        self.__diff_arr = None
 
-    # ax2 = fig.add_subplot(1, 4, 4)
-    # ax = img1.gca()
-    # img = ax.matshow(arr, cmap='RdYlGn_r')
-    img = ax.imshow(arr, cmap=COLORMAP, aspect='auto')
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size='5%', pad=0.1)
-    cbar = plt.colorbar(img, cax=cax, ax=ax)
-    cbar.set_ticks([0, 255 / 4, 255 / 2, 255 * 3 / 4, 254])
-    cbar.set_ticklabels(["0 %", "25 %", "50 %", "75 %", "100 %"])
-    plt.title("Heatmap", loc='right')
-    # plt.colorbar(img, ax=ax, format='%')
+    def __make_diff(self):
+        if self.__diff_arr is not None:
+            return
 
-    # if ar1 is not None and ar2 is not None:
-    #     img2 = fig.add_subplot(1, 3, 1)
-    #     img2.imshow(ar1, cmap='gray', aspect='auto')
-    #     plt.title(file1 if file1 else "first")
-    #     img3 = fig.add_subplot(1, 3, 2)
-    #     img3.imshow(ar2, cmap='gray', aspect='auto')
-    #     plt.title(file2 if file2 else "second")
+        # способ 1
+        # d = np.abs(self.__ar1 - self.__ar2)
+        # # нормализуем
+        # mx = np.max(d)
+        # d = d / mx * BIT_IMAGES_LEN
+        # d *= BIT_IMAGES_LEN
 
-        # fig.suptitle('Heatmaps with `Axes.matshow`', fontsize=16)
-    res_heatmap = os.path.join(RESULT_HM_DIR, f"{file1}_{file2}.png")
-    plt.savefig(res_heatmap)
-    return res_heatmap
-    # plt.show()
+        # способ 2
+        # mx = np.vstack((self.__ar1.ravel(), self.__ar2.ravel())).max(axis=0).reshape(self.__ar1.shape)
+        # d = (np.abs(self.__ar1 - self.__ar2) + 1) / (mx + 1)
+        # d[np.isnan(d)] = 0.0
+        # d = d * BIT_IMAGES_LEN
 
 
-def make_heat_map_from_gray(gray_image, gray_image2):
-    ar1 = np.asarray(gray_image, float)
-    ar2 = np.asarray(gray_image2, float)
-    diff_arr = make_diff(ar1, ar2)
-    if diff_save_path:
-        cv2.imwrite(diff_save_path, diff_arr)
-    return make_heat_map(diff_arr, ar1, ar2)
+        # способ 3
+        d = (self.__ar1+1) / (self.__ar2 +1)
+        d = np.log(d)
+        mx = np.max(d)
+        d = d / mx
+        d *= BIT_IMAGES_LEN
+
+        # способ 0
+        # d = self.__ar1 - self.__ar2
+
+        # print(d)
+        self.__diff_arr = d
+
+    def calc_statistics(self):
+        self.__make_diff()
+        window_size = 10
+        a = self.__diff_arr
+        res = 0
+        for i in range(len(a) - window_size + 1):
+            for j in range(len(a[i]) - window_size + 1):
+                res = max(res, a[i:i + window_size, j:j + window_size].mean())
+        print(res / BIT_IMAGES_LEN * 100, "% - square")
+        print(np.mean(self.__diff_arr) / BIT_IMAGES_LEN * 100, "% - mean")
+        print(np.max(self.__diff_arr) / BIT_IMAGES_LEN * 100, "% - max")
+
+    def __create_heatmap(self):
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+        fig = plt.figure(figsize=(12, 3))
+        ax = fig.add_subplot(1, 3, 3)
+
+        img = ax.imshow(self.__diff_arr, cmap=COLORMAP, aspect='auto')
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size='5%', pad=0.1)
+        cbar = plt.colorbar(img, cax=cax, ax=ax)
+        cbar.set_ticks([0, BIT_IMAGES_LEN / 4, BIT_IMAGES_LEN / 2, BIT_IMAGES_LEN * 3 / 4, BIT_IMAGES_LEN - 1])
+        cbar.set_ticklabels(["0 %", "25 %", "50 %", "75 %", "100 %"])
+        plt.title("Heatmap", loc='right')
+
+        img2 = fig.add_subplot(1, 3, 1)
+        # img2.imshow(self.__image1, aspect='auto')
+        img2.imshow(self.__ar1, aspect='auto', cmap='gray')
+        plt.title(self.__file_name1)
+
+        img3 = fig.add_subplot(1, 3, 2)
+        # img3.imshow(self.__image2, aspect='auto')
+        img3.imshow(self.__ar2, aspect='auto', cmap='gray')
+        plt.title(self.__file_name2)
+
+        plt.savefig(self.__heatmap_path)
+
+        plt.show()
+        # cv2.imshow(self.__heatmap_path)
+
+    def __make_heatmap_from_gray(self):
+        self.__make_diff()
+        cv2.imwrite(self.__diff_save_path, self.__diff_arr)
+        self.__create_heatmap()
+
+    def create(self):
+        self.__make_heatmap_from_gray()
 
 
-def make_two_gray(gray_file, gray_file2):
-    global file1, file2, diff_save_path
-    if not os.path.isfile(gray_file2) or not os.path.isfile(gray_file):
-        print("File " + gray_file + " or " + gray_file2 + " not exist")
-        return
-    file1 = get_file_name(gray_file)
-    file2 = get_file_name(gray_file2)
-    diff_save_path = os.path.join(RESULT_DIF_DIR, f"{file1}_{file2}.png")
-
-    gray_image = cv2.imread(gray_file, cv2.IMREAD_GRAYSCALE)
-    gray_image2 = cv2.imread(gray_file2, cv2.IMREAD_GRAYSCALE)
-    return make_heat_map_from_gray(gray_image, gray_image2)
-
-
-def make_with_origin(origin_file):
+def heatmap_from_one(origin_file):
     if not os.path.isfile(origin_file):
         print("File " + origin_file + " not exist")
         return
 
-    gray1 = make_gray_img(origin_file)
-    # gray2 = make_gray_img(origin_file)
+    gray1 = read_img_in_gray(origin_file)
     r, g = 0.1, 0.2
     b = 1 - r - g
-    gray2 = make_gray_img(origin_file, [r, g, b])
-    make_heat_map_from_gray(gray1, gray2)
+    gray2 = read_img_in_gray(origin_file, [r, g, b])
+    file_name = get_file_name(origin_file)
+    file_1 = os.path.join(PATH_TO_GRAY_IMGS, file_name + '_gray1.jpg')
+    file_2 = os.path.join(PATH_TO_GRAY_IMGS, file_name + '_gray2.jpg')
+    cv2.imwrite(file_1, gray1)
+    cv2.imwrite(file_2, gray2)
+
+    hm = HeatMap(origin_file, file_2)
+    hm.create()
 
 
-if __name__ == '__main__':
+def main():
+    global RESULT_DIR, RESULT_HM_DIR, RESULT_DIF_DIR
     parser = argparse.ArgumentParser()
-    parser.add_argument('-o', '--origin', type=str, help='Path to origin file')
-    parser.add_argument('-c', '--compare', type=str, nargs=2, help='Paths to 2 gray files')
-    parser.add_argument('-m', '--heat_map', type=str, help='Paths to diff file')
-    parser.add_argument('-s', '--save', type=str, help='Path for save file')
+    parser.add_argument('-o', '--one', type=str, help='Path to one origin image file')
+    parser.add_argument('-c', '--compare', type=str, nargs=2, help='Paths to images files')
+    # parser.add_argument('-i', '--info', help='Print statistics for comparing')
+    parser.add_argument('-s', '--save', type=str, help='Path to save directory')
     args = vars(parser.parse_args())
     if args['save']:
-        diff_save_path = os.path.join(RESULT_DIR, args['save'] + "_diff.jpg")
-    if args['origin']:
-        make_with_origin(args['origin'])
+        RESULT_DIR = make_dir(args['save'])
+        RESULT_HM_DIR = make_dir(os.path.join(RESULT_DIR, "heatmaps"))
+        RESULT_DIF_DIR = make_dir(os.path.join(RESULT_DIR, "diff"))
+    if args['one']:
+        heatmap_from_one(args['one'])
     elif args['compare']:
-        make_two_gray(args['compare'][0], args['compare'][1])
-    elif args['heat_map']:
-        diff_img = cv2.imread(args['heat_map'], cv2.IMREAD_GRAYSCALE)
-        make_heat_map(diff_img)
+        try:
+            hm = HeatMap(args['compare'][0], args['compare'][1])
+            hm.create()
+            # if args['info']:
+            # hm.calc_statistics()
+        except Exception as e:
+            print(e)
     else:
         print("Not enough arguments.")
         parser.print_help()
+
+
+if __name__ == '__main__':
+    main()
