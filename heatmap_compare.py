@@ -38,14 +38,15 @@ def get_file_name(file):
 
 
 class HeatMap:
-    def __init__(self, file1, file2):
+    def __init__(self, file1, file2, method=0, use_gui=False):
         if not os.path.isfile(file1) or not os.path.isfile(file2):
             raise FileNotFoundError(file1 + " or " + file2 + " not exist")
         self.__file_name1 = get_file_name(file1)
         self.__file_name2 = get_file_name(file2)
         self.__diff_save_path = os.path.join(RESULT_DIF_DIR, f"{self.__file_name1}_{self.__file_name2}.png")
         self.__heatmap_path = os.path.join(RESULT_HM_DIR, f"{self.__file_name1}_{self.__file_name2}.png")
-
+        self.__method = method + 1
+        self.__use_gui = use_gui
         gray_image = cv2.imread(file1, cv2.IMREAD_GRAYSCALE)
         gray_image2 = cv2.imread(file2, cv2.IMREAD_GRAYSCALE)
 
@@ -67,30 +68,36 @@ class HeatMap:
     def __make_diff(self):
         if self.__diff_arr is not None:
             return
-
-        # способ 1
-        # d = np.abs(self.__ar1 - self.__ar2)
-        # # нормализуем
-        # mx = np.max(d)
-        # d = d / mx * BIT_IMAGES_LEN
-        # d *= BIT_IMAGES_LEN
-
-        # способ 2
-        # mx = np.vstack((self.__ar1.ravel(), self.__ar2.ravel())).max(axis=0).reshape(self.__ar1.shape)
-        # d = (np.abs(self.__ar1 - self.__ar2) + 1) / (mx + 1)
-        # d[np.isnan(d)] = 0.0
-        # d = d * BIT_IMAGES_LEN
-
-
-        # способ 3
-        d = (self.__ar1+1) / (self.__ar2 +1)
-        d = np.log(d)
-        mx = np.max(d)
-        d = d / mx
-        d *= BIT_IMAGES_LEN
+        d = []
 
         # способ 0
         # d = self.__ar1 - self.__ar2
+
+        # способ 1
+        if self.__method == 1:
+            # d = self.__ar1 - self.__ar2
+
+            d = np.abs(self.__ar1 - self.__ar2)
+            mx = np.max(d)
+            d = d / mx
+            d *= BIT_IMAGES_LEN
+
+        # способ 2
+        if self.__method == 2:
+            mx = np.vstack((self.__ar1.ravel(), self.__ar2.ravel())).max(axis=0).reshape(self.__ar1.shape)
+            d = np.abs(self.__ar1 - self.__ar2) / mx
+            d[np.isnan(d)] = 0.0
+            d = d * BIT_IMAGES_LEN
+
+        # способ 3
+        if self.__method == 3:
+            d = self.__ar1 / (self.__ar2 + 0.01)
+            d = np.log(d)
+            mx = np.max(d)
+            if mx == 0:
+                mx = 0.0001
+            d = d / mx
+            d *= BIT_IMAGES_LEN
 
         # print(d)
         self.__diff_arr = d
@@ -110,36 +117,49 @@ class HeatMap:
     def __create_heatmap(self):
         from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-        fig = plt.figure(figsize=(12, 3))
-        ax = fig.add_subplot(1, 3, 3)
+        if self.__use_gui:
+            fig = plt.figure(figsize=(4, 4))
+            ax = fig.add_subplot(1, 1, 1)
+        else:
+            fig = plt.figure(figsize=(12, 3))
+            ax = fig.add_subplot(1, 3, 3)
 
         img = ax.imshow(self.__diff_arr, cmap=COLORMAP, aspect='auto')
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size='5%', pad=0.1)
         cbar = plt.colorbar(img, cax=cax, ax=ax)
-        cbar.set_ticks([0, BIT_IMAGES_LEN / 4, BIT_IMAGES_LEN / 2, BIT_IMAGES_LEN * 3 / 4, BIT_IMAGES_LEN - 1])
-        cbar.set_ticklabels(["0 %", "25 %", "50 %", "75 %", "100 %"])
-        plt.title("Heatmap", loc='right')
+        mn = np.min(self.__diff_arr)
+        sr = np.mean(self.__diff_arr)
+        mx = np.max(self.__diff_arr)
+        cbar.set_ticks([mn, sr, mx])
+        cbar.set_ticklabels(["0 %", "50 %", "100 %"])
+        # cbar.set_ticks([0, BIT_IMAGES_LEN / 4, BIT_IMAGES_LEN / 2, BIT_IMAGES_LEN * 3 / 4, BIT_IMAGES_LEN - 1])
+        # cbar.set_ticklabels(["0 %", "25 %", "50 %", "75 %", "100 %"])
+        if not self.__use_gui:
+            plt.title("Heatmap", loc='right')
 
-        img2 = fig.add_subplot(1, 3, 1)
-        # img2.imshow(self.__image1, aspect='auto')
-        img2.imshow(self.__ar1, aspect='auto', cmap='gray')
-        plt.title(self.__file_name1)
+            img2 = fig.add_subplot(1, 3, 1)
+            # img2.imshow(self.__image1, aspect='auto')
+            img2.imshow(self.__ar1, aspect='auto', cmap='gray')
+            plt.title(self.__file_name1)
 
-        img3 = fig.add_subplot(1, 3, 2)
-        # img3.imshow(self.__image2, aspect='auto')
-        img3.imshow(self.__ar2, aspect='auto', cmap='gray')
-        plt.title(self.__file_name2)
+            img3 = fig.add_subplot(1, 3, 2)
+            # img3.imshow(self.__image2, aspect='auto')
+            img3.imshow(self.__ar2, aspect='auto', cmap='gray')
+            plt.title(self.__file_name2)
 
         plt.savefig(self.__heatmap_path)
 
-        plt.show()
-        # cv2.imshow(self.__heatmap_path)
+        if not self.__use_gui:
+            plt.show()
 
     def __make_heatmap_from_gray(self):
         self.__make_diff()
         cv2.imwrite(self.__diff_save_path, self.__diff_arr)
         self.__create_heatmap()
+
+    def get_path(self):
+        return self.__heatmap_path
 
     def create(self):
         self.__make_heatmap_from_gray()
